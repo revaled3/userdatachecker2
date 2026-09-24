@@ -11,7 +11,7 @@
 #     irm https://raw.githubusercontent.com/revaled3/userdatachecker2/main/check.ps1 | iex
 #
 #  Skrypt sam poprosi o uprawnienia administratora (okno UAC).
-#  Wynik: plik steam_userdata_log.txt na Pulpicie + kopia w schowku.
+#  Wynik: steam_userdata_log.html + .txt w folderze Pobrane, kopia w schowku.
 #  Skrypt NICZEGO nie usuwa ani nie zmienia - tylko czyta dziennik USN.
 # =====================================================================
 
@@ -324,16 +324,25 @@ try {
         throw "Nie potrafię ustalić litery dysku dla folderu: $Target"
     }
 
-    # Wynik zapisujemy na Pulpicie; jeśli się nie da - w folderze TEMP.
-    $OutDir = [Environment]::GetFolderPath('Desktop')
+    # Wynik zapisujemy w folderze Pobrane; jeśli się nie da - na Pulpicie, a w ostateczności w TEMP.
+    $downloads = $null
     try {
-        if (-not $OutDir -or -not (Test-Path -LiteralPath $OutDir -PathType Container)) { throw 'brak Pulpitu' }
-        $probe = Join-Path $OutDir ('.usn_write_test_{0}.tmp' -f ([guid]::NewGuid().ToString('N')))
-        Set-Content -LiteralPath $probe -Value 'x' -ErrorAction Stop
-        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
-    } catch {
-        $OutDir = $env:TEMP
+        # rzeczywista lokalizacja "Pobranych" (użytkownik mógł ją przenieść na inny dysk)
+        $raw = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' -ErrorAction Stop).'{374DE290-123F-4565-9164-39C4925E467B}'
+        if ($raw) { $downloads = [Environment]::ExpandEnvironmentVariables($raw) }
+    } catch {}
+    $OutDir = $null
+    foreach ($dir in @($downloads, (Join-Path $env:USERPROFILE 'Downloads'), [Environment]::GetFolderPath('Desktop'), $env:TEMP)) {
+        if (-not $dir -or -not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+        try {
+            $probe = Join-Path $dir ('.usn_write_test_{0}.tmp' -f ([guid]::NewGuid().ToString('N')))
+            Set-Content -LiteralPath $probe -Value 'x' -ErrorAction Stop
+            Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+            $OutDir = $dir
+            break
+        } catch {}
     }
+    if (-not $OutDir) { $OutDir = $env:TEMP }
     $LogPath = Join-Path $OutDir 'steam_userdata_log.txt'
 
     Write-Log "Start analizy."
