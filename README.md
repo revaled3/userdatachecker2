@@ -16,8 +16,8 @@ irm https://raw.githubusercontent.com/revaled3/userdatachecker2/main/check.ps1 |
 
 3. Potwierdź okno **UAC** (uprawnienia administratora są potrzebne do odczytu dziennika USN).
 4. Po ~30–60 s raport:
-   - otworzy się w Notatniku,
-   - zostanie zapisany na Pulpicie jako `steam_userdata_log.txt`,
+   - otworzy się w przeglądarce jako strona HTML,
+   - zostanie zapisany na Pulpicie jako `steam_userdata_log.html` i `steam_userdata_log.txt`,
    - zostanie skopiowany do schowka – wystarczy wkleić go (Ctrl+V) osobie, która o niego prosi.
 
 ## Co oznaczają wyniki
