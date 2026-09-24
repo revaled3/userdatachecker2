@@ -687,8 +687,155 @@ try {
     Set-Content -LiteralPath $LogPath -Value $logLines -Encoding UTF8
     $LogWritten = $true
 
+    function HtmlEnc { param($Text) [System.Net.WebUtility]::HtmlEncode([string]$Text) }
+
+    function Get-OpClass {
+        param([string]$Op)
+        if ($Op.StartsWith('USUNIĘTO TRWALE')) { return 'del' }
+        if ($Op.StartsWith('USUNIĘTO'))        { return 'bin' }
+        if ($Op.StartsWith('PRZYWRÓCONO'))     { return 'restore' }
+        if ($Op.StartsWith('ZMIENIONO'))       { return 'rename' }
+        return 'move'
+    }
+
+    function New-HtmlReport {
+        $css = @'
+:root{--bg:#f6f7f9;--card:#fff;--text:#1b1f24;--muted:#5f6b7a;--line:#e3e6ea;--mono:#f0f2f5;
+--ok:#1a7f37;--ok-bg:#e6f4ea;--bad:#c62828;--bad-bg:#fdecea;--warn:#b35c00;--warn-bg:#fff2e0;
+--blue:#1f5fbf;--blue-bg:#e7effb;--violet:#6b3fb5;--violet-bg:#f1eafb}
+@media (prefers-color-scheme:dark){:root{--bg:#111418;--card:#1a1e24;--text:#e6e9ed;--muted:#98a2ae;--line:#2b313a;--mono:#232830;
+--ok:#56d364;--ok-bg:#15301d;--bad:#ff7b72;--bad-bg:#3a1a1a;--warn:#ffa657;--warn-bg:#3a2712;
+--blue:#79b8ff;--blue-bg:#16263d;--violet:#c4a5ff;--violet-bg:#2a1f3f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 "Segoe UI",system-ui,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:28px 16px 48px}
+h1{font-size:24px;margin:0 0 4px}
+h2{font-size:17px;margin:32px 0 12px}
+.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.meta{display:grid;grid-template-columns:auto 1fr;gap:6px 16px}
+.meta dt{color:var(--muted)} .meta dd{margin:0;word-break:break-all}
+.verdict{margin:20px 0;padding:16px 18px;border-radius:10px;font-weight:600;font-size:16px}
+.verdict small{display:block;font-weight:400;font-size:14px;margin-top:4px;opacity:.9}
+.verdict.ok{background:var(--ok-bg);color:var(--ok)} .verdict.bad{background:var(--bad-bg);color:var(--bad)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.stat .n{font-size:28px;font-weight:700;line-height:1.1} .stat .l{color:var(--muted);font-size:13px}
+.ev{margin-bottom:10px}
+.ev-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-bottom:8px}
+.time{font-variant-numeric:tabular-nums;font-weight:600}
+.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.02em;white-space:nowrap}
+.b-del{background:var(--bad-bg);color:var(--bad)} .b-bin{background:var(--warn-bg);color:var(--warn)}
+.b-move{background:var(--blue-bg);color:var(--blue)} .b-rename{background:var(--violet-bg);color:var(--violet)}
+.b-restore{background:var(--ok-bg);color:var(--ok)}
+.today{background:var(--bad);color:#fff}
+.path{font-family:Consolas,"Cascadia Mono",monospace;font-size:13px;background:var(--mono);padding:2px 6px;border-radius:4px;word-break:break-all}
+.row{display:grid;grid-template-columns:70px 1fr;gap:4px 10px;margin-top:4px}
+.row .k{color:var(--muted);font-size:13px;padding-top:2px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:13px}
+td.t{white-space:nowrap;font-variant-numeric:tabular-nums}
+.empty{color:var(--muted)}
+.note{color:var(--muted);font-size:13px;margin-top:8px}
+.legend{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center}
+details{margin-top:24px} summary{cursor:pointer;color:var(--muted)}
+pre{background:var(--mono);padding:12px;border-radius:8px;overflow-x:auto;font-size:12px}
+@media (max-width:600px){.row{grid-template-columns:1fr}.row .k{padding:0}td.t{white-space:normal}}
+'@
+        $sb = New-Object System.Text.StringBuilder
+        $gen = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        [void]$sb.Append('<!DOCTYPE html><html lang="pl"><head><meta charset="utf-8">')
+        [void]$sb.Append('<meta name="viewport" content="width=device-width,initial-scale=1">')
+        [void]$sb.Append(('<title>Raport userdata - {0}</title><style>{1}</style></head><body><main>' -f (HtmlEnc $env:COMPUTERNAME), $css))
+
+        [void]$sb.Append('<h1>Raport: Steam userdata</h1>')
+        [void]$sb.Append('<p class="sub">Usunięcia, przeniesienia i zmiany nazw odczytane z dziennika zmian NTFS (USN Journal)</p>')
+        [void]$sb.Append('<div class="card"><dl class="meta">')
+        [void]$sb.Append(('<dt>Komputer</dt><dd>{0}</dd>' -f (HtmlEnc $env:COMPUTERNAME)))
+        [void]$sb.Append(('<dt>Folder</dt><dd><span class="path">{0}</span></dd>' -f (HtmlEnc $AnchorPath)))
+        [void]$sb.Append(('<dt>Zakres dziennika</dt><dd>{0}</dd>' -f (HtmlEnc $zakres)))
+        [void]$sb.Append(('<dt>Wygenerowano</dt><dd>{0}</dd>' -f (HtmlEnc $gen)))
+        [void]$sb.Append('</dl></div>')
+
+        $fileDeletes = @($fileEvents | Where-Object { $_.Operacja.StartsWith('USUNIĘTO') }).Count
+        if ($folderEvents.Count -gt 0) {
+            [void]$sb.Append(('<div class="verdict bad">Wykryto operacje na folderach w userdata: {0}<small>Szczegóły poniżej - sprawdź daty i ścieżki.</small></div>' -f $folderEvents.Count))
+        } elseif ($fileEvents.Count -gt 0) {
+            [void]$sb.Append(('<div class="verdict ok">Brak operacji na folderach w userdata<small>Wykryto tylko operacje na pojedynczych plikach: {0} (w tym usunięć: {1}).</small></div>' -f $fileEvents.Count, $fileDeletes))
+        } else {
+            [void]$sb.Append('<div class="verdict ok">Nie wykryto żadnych usunięć, przeniesień ani zmian nazw<small>W okresie objętym dziennikiem USN.</small></div>')
+        }
+
+        [void]$sb.Append('<div class="stats">')
+        [void]$sb.Append(('<div class="card stat"><div class="n">{0}</div><div class="l">operacji na folderach</div></div>' -f $folderEvents.Count))
+        [void]$sb.Append(('<div class="card stat"><div class="n">{0}</div><div class="l">operacji na plikach</div></div>' -f $fileEvents.Count))
+        [void]$sb.Append(('<div class="card stat"><div class="n">{0}</div><div class="l">pominiętych zdarzeń automatycznych Steama</div></div>' -f ($skippedTemp + $skippedFolderAuto)))
+        [void]$sb.Append('</div>')
+
+        [void]$sb.Append('<h2>Operacje na folderach (od najnowszej)</h2>')
+        if ($folderEvents.Count -eq 0) {
+            [void]$sb.Append('<div class="card empty">Brak - w dostępnym oknie dziennika USN nie wykryto usunięć, przeniesień ani zmian nazw folderów.</div>')
+        } else {
+            foreach ($e in $folderEvents) {
+                [void]$sb.Append('<div class="card ev"><div class="ev-head">')
+                [void]$sb.Append(('<span class="time">{0}</span><span class="badge b-{1}">{2}</span>' -f (HtmlEnc $e.Czas), (Get-OpClass $e.Operacja), (HtmlEnc $e.Operacja)))
+                if ($e.Czas.StartsWith($today)) { [void]$sb.Append('<span class="badge today">DZIŚ</span>') }
+                [void]$sb.Append('</div>')
+                [void]$sb.Append(('<div class="row"><span class="k">skąd</span><span><span class="path">{0}</span></span></div>' -f (HtmlEnc $e.Skad)))
+                if ($e.Dokad)     { [void]$sb.Append(('<div class="row"><span class="k">dokąd</span><span><span class="path">{0}</span></span></div>' -f (HtmlEnc $e.Dokad))) }
+                if ($e.Szczegoly) { [void]$sb.Append(('<div class="row"><span class="k">uwagi</span><span>{0}</span></div>' -f (HtmlEnc $e.Szczegoly))) }
+                [void]$sb.Append('</div>')
+            }
+        }
+        if ($skippedFolderAuto -gt 0) {
+            [void]$sb.Append(('<p class="note">Pominięto {0} operacji na automatycznych podkatalogach Steama (gamerecordings\, *cache\, logs\).</p>' -f $skippedFolderAuto))
+        }
+
+        [void]$sb.Append('<h2>Operacje na pojedynczych plikach</h2>')
+        if ($fileEvents.Count -eq 0) {
+            [void]$sb.Append('<div class="card empty">Brak istotnych zdarzeń plikowych.</div>')
+        } else {
+            [void]$sb.Append('<div class="card" style="padding:4px 8px;overflow-x:auto"><table><thead><tr><th>Czas</th><th>Operacja</th><th>Ścieżka</th></tr></thead><tbody>')
+            foreach ($e in $fileEvents) {
+                $mark = if ($e.Czas.StartsWith($today)) { ' <span class="badge today">DZIŚ</span>' } else { '' }
+                $pathHtml = '<span class="path">{0}</span>' -f (HtmlEnc $e.Skad)
+                if ($e.Dokad) { $pathHtml += ' &rarr; <span class="path">{0}</span>' -f (HtmlEnc $e.Dokad) }
+                [void]$sb.Append(('<tr><td class="t">{0}{1}</td><td><span class="badge b-{2}">{3}</span></td><td>{4}</td></tr>' -f
+                    (HtmlEnc $e.Czas), $mark, (Get-OpClass $e.Operacja), (HtmlEnc $e.Operacja), $pathHtml))
+            }
+            [void]$sb.Append('</tbody></table></div>')
+        }
+        if ($skippedTemp -gt 0) {
+            [void]$sb.Append(('<p class="note">Pominięto {0} zdarzeń - normalna praca Steama (pliki *.tmp, *.vdf~, *.crdownload, podkatalogi *cache\, logs\, gamerecordings\).</p>' -f $skippedTemp))
+        }
+
+        [void]$sb.Append('<h2>Znaczenie operacji</h2><div class="card legend">')
+        [void]$sb.Append('<span class="badge b-bin">USUNIĘTO (do Kosza)</span><span>przeniesione do Kosza (zwykłe Delete)</span>')
+        [void]$sb.Append('<span class="badge b-del">USUNIĘTO TRWALE</span><span>usunięte z pominięciem Kosza (Shift+Del) lub opróżniono Kosz</span>')
+        [void]$sb.Append('<span class="badge b-rename">ZMIENIONO NAZWĘ</span><span>zmiana nazwy w tym samym miejscu</span>')
+        [void]$sb.Append('<span class="badge b-move">PRZENIESIONO</span><span>zmiana lokalizacji (w obrębie, poza lub do userdata)</span>')
+        [void]$sb.Append('<span class="badge b-restore">PRZYWRÓCONO z Kosza</span><span>odzyskane z Kosza</span>')
+        [void]$sb.Append('</div>')
+        [void]$sb.Append('<p class="note">Dziennik USN ma ograniczony rozmiar - zdarzenia starsze niż podany zakres mogły zostać już nadpisane.</p>')
+
+        $tech = @($logLines | Where-Object { $_.StartsWith('[') }) -join "`n"
+        [void]$sb.Append(('<details><summary>Log techniczny</summary><pre>{0}</pre></details>' -f (HtmlEnc $tech)))
+        [void]$sb.Append('</main></body></html>')
+        return $sb.ToString()
+    }
+
     $copied = $false
     try { Set-Clipboard -Value ($logLines -join "`r`n"); $copied = $true } catch {}
+
+    # ---------- 8. Raport HTML (otwierany w przeglądarce) ----------
+    $HtmlPath = [System.IO.Path]::ChangeExtension($LogPath, '.html')
+    try {
+        $html = New-HtmlReport
+        [System.IO.File]::WriteAllText($HtmlPath, $html, (New-Object System.Text.UTF8Encoding $true))
+    } catch {
+        Write-Host ("Nie udało się zapisać raportu HTML: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+        $HtmlPath = $null
+    }
 
     Write-Host ''
     Write-Host '=====================================================' -ForegroundColor Green
@@ -709,12 +856,18 @@ try {
     }
     Write-Host ''
     Write-Host ("Wynik zapisany w: {0}" -f $LogPath)
+    if ($HtmlPath) { Write-Host ("Raport HTML     : {0}" -f $HtmlPath) }
     if ($copied) {
         Write-Host 'Raport skopiowano do schowka - wystarczy go wkleić (Ctrl+V) osobie, która o niego prosi.' -ForegroundColor Cyan
     }
     Write-Host ''
 
-    try { Start-Process notepad.exe -ArgumentList ('"{0}"' -f $LogPath) } catch {}
+    # explorer.exe otwiera plik w domyślnej przeglądarce jako zwykły użytkownik (nie jako Administrator)
+    if ($HtmlPath) {
+        try { Start-Process explorer.exe -ArgumentList ('"{0}"' -f $HtmlPath) } catch {}
+    } else {
+        try { Start-Process notepad.exe -ArgumentList ('"{0}"' -f $LogPath) } catch {}
+    }
 }
 catch {
     $logLines.Add('')
